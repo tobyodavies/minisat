@@ -140,6 +140,8 @@ public:
 
     int       restart_first;      // The initial restart limit.                                                                (default 100)
     double    restart_inc;        // The factor with which the restart limit is multiplied in each restart.                    (default 1.5)
+    bool      lbd_heuristic;
+    bool      dynamic_lbd;
     double    learntsize_factor;  // The intitial limit for learnt clauses is a factor of the original clauses.                (default 1 / 3)
     double    learntsize_inc;     // The limit for learnt clauses is multiplied with this factor each restart.                 (default 1.1)
 
@@ -225,6 +227,7 @@ protected:
     vec<ShrinkStackElem>analyze_stack;
     vec<Lit>            analyze_toclear;
     vec<Lit>            add_tmp;
+    mutable IntSet<int> lbdlevels;
 
     double              max_learnts;
     double              learntsize_adjust_confl;
@@ -270,6 +273,9 @@ protected:
     bool     isRemoved        (CRef cr) const;         // Test if a clause has been removed.
     bool     locked           (const Clause& c) const; // Returns TRUE if a clause is a reason for some implication in the current state.
     bool     satisfied        (const Clause& c) const; // Returns TRUE if a clause is satisfied in the current state.
+
+    unsigned lbd(const vec<Lit>& c) const;             // Calculates Literals Block Distance for a clause based on current search state
+    unsigned lbd(const Clause& c) const;             // Calculates Literals Block Distance for a clause based on current search state
 
     // Misc:
     //

@@ -45,7 +45,8 @@ static IntOption     opt_restart_first     (_cat, "rfirst",      "The base resta
 static DoubleOption  opt_restart_inc       (_cat, "rinc",        "Restart interval increase factor", 2, DoubleRange(1, false, HUGE_VAL, false));
 static DoubleOption  opt_garbage_frac      (_cat, "gc-frac",     "The fraction of wasted memory allowed before a garbage collection is triggered",  0.20, DoubleRange(0, false, HUGE_VAL, false));
 static IntOption     opt_min_learnts_lim   (_cat, "min-learnts", "Minimum learnt clause limit",  0, IntRange(0, INT32_MAX));
-
+static BoolOption    opt_lbd_heuristic      (_cat, "lbd",        "Use the LBD clause quality heuristic when reducing the clause DB", true);
+static BoolOption    opt_dynamic_lbd      (_cat, "dynamic-lbd", "Recalculate the LBD clause quality heuristic when propagating", false);
 
 //=================================================================================================
 // Constructor/Destructor:
@@ -69,7 +70,8 @@ Solver::Solver() :
   , min_learnts_lim  (opt_min_learnts_lim)
   , restart_first    (opt_restart_first)
   , restart_inc      (opt_restart_inc)
-
+  , lbd_heuristic    (opt_lbd_heuristic)
+  , dynamic_lbd      (opt_dynamic_lbd)
     // Parameters (the rest):
     //
   , learntsize_factor((double)1/(double)3), learntsize_inc(1.1)
@@ -223,8 +225,30 @@ bool Solver::satisfied(const Clause& c) const {
     for (int i = 0; i < c.size(); i++)
         if (value(c[i]) == l_True)
             return true;
-    return false; }
+    return false;
+}
 
+unsigned Solver::lbd(const Clause& c) const {
+    lbdlevels.clear();
+    for (int i = 0 ; i < c.size() ; i++){
+      lbdlevels.insert(level(var(c[i])));
+      if (lbdlevels.size() >= MAX_LBD){
+        return MAX_LBD;
+      }
+    }
+    return lbdlevels.size();
+}
+
+unsigned Solver::lbd(const vec<Lit>& c) const {
+    IntSet<int> levels;
+    for (int i = 0 ; i < c.size() ; i++){
+      levels.insert(level(var(c[i])));
+      if (levels.size() >= MAX_LBD){
+        return MAX_LBD;
+      }
+    }
+    return levels.size();
+}
 
 // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
 //
@@ -550,8 +574,11 @@ CRef Solver::propagate()
                 // Copy the remaining watches:
                 while (i < end)
                     *j++ = *i++;
-            }else
+            }else{
                 uncheckedEnqueue(first, cr);
+                if (dynamic_lbd && ca[cr].learnt())
+                  c.set_lbd(lbd(c));
+            }
 
         NextClause:;
         }
@@ -572,26 +599,48 @@ CRef Solver::propagate()
 |    Remove half of the learnt clauses, minus the clauses locked by the current assignment. Locked
 |    clauses are clauses that are reason to some assignment. Binary clauses are never removed.
 |________________________________________________________________________________________________@*/
-struct reduceDB_lt { 
+#define KEEP_CLAUSE_SIZE 2
+#define KEEP_LBD_LTE 3
+struct reduceDB_activity_lt { 
     ClauseAllocator& ca;
-    reduceDB_lt(ClauseAllocator& ca_) : ca(ca_) {}
+    reduceDB_activity_lt(ClauseAllocator& ca_) : ca(ca_) {}
     bool operator () (CRef x, CRef y) { 
-        return ca[x].size() > 2 && (ca[y].size() == 2 || ca[x].activity() < ca[y].activity()); } 
+        return ca[x].size() > 2 && (ca[y].size() == 2 || ca[x].activity() < ca[y].activity());
+    }
+};
+struct reduceDB_lbd_lt { 
+    ClauseAllocator& ca;
+    reduceDB_lbd_lt(ClauseAllocator& ca_) : ca(ca_) {}
+    bool operator () (CRef x, CRef y) {
+        return (ca[x].lbd() == ca[y].lbd())?
+                 ca[x].activity() < ca[y].activity():
+                 ca[x].lbd() > ca[y].lbd();
+    }
 };
 void Solver::reduceDB()
 {
     int     i, j;
     double  extra_lim = cla_inc / learnts.size();    // Remove any clause below this activity
 
-    sort(learnts, reduceDB_lt(ca));
+    if (lbd_heuristic){
+      sort(learnts, reduceDB_activity_lt(ca));
+    } else {
+      sort(learnts, reduceDB_lbd_lt(ca));
+    }
     // Don't delete binary or locked clauses. From the rest, delete clauses from the first half
     // and clauses with activity smaller than 'extra_lim':
+    //int maxRemoved = learnts.size()/2;
     for (i = j = 0; i < learnts.size(); i++){
         Clause& c = ca[learnts[i]];
-        if (c.size() > 2 && !locked(c) && (i < learnts.size() / 2 || c.activity() < extra_lim))
+        if (c.size() > KEEP_CLAUSE_SIZE
+            &&
+            (lbd_heuristic && c.lbd() > KEEP_LBD_LTE)
+            && !locked(c)
+            && (i < learnts.size()/2 || c.activity() < extra_lim)){
             removeClause(learnts[i]);
-        else
+        } else {
             learnts[j++] = learnts[i];
+        }
     }
     learnts.shrink(i - j);
     checkGarbage();
@@ -721,7 +770,7 @@ lbool Solver::search(int nof_conflicts)
             if (learnt_clause.size() == 1){
                 uncheckedEnqueue(learnt_clause[0]);
             }else{
-                CRef cr = ca.alloc(learnt_clause, true);
+              CRef cr = ca.alloc(learnt_clause, true, lbd_heuristic?lbd(learnt_clause):MAX_LBD);
                 learnts.push(cr);
                 attachClause(cr);
                 claBumpActivity(ca[cr]);
