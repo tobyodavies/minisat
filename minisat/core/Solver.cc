@@ -230,24 +230,30 @@ bool Solver::satisfied(const Clause& c) const {
 
 unsigned Solver::lbd(const Clause& c) const {
     lbdlevels.clear();
+    if(c.size() <= 2){
+      return 1;
+    }
     for (int i = 0 ; i < c.size() ; i++){
       lbdlevels.insert(level(var(c[i])));
       if (lbdlevels.size() >= MAX_LBD){
         return MAX_LBD;
       }
     }
-    return lbdlevels.size();
+    return lbdlevels.size() - 1;
 }
 
 unsigned Solver::lbd(const vec<Lit>& c) const {
-    IntSet<int> levels;
+    lbdlevels.clear();
+    if(c.size() <= 2){
+      return 1;
+    }
     for (int i = 0 ; i < c.size() ; i++){
-      levels.insert(level(var(c[i])));
-      if (levels.size() >= MAX_LBD){
+      lbdlevels.insert(level(var(c[i])));
+      if (lbdlevels.size() >= MAX_LBD){
         return MAX_LBD;
       }
     }
-    return levels.size();
+    return lbdlevels.size() - 1;
 }
 
 // Revert to the state at given level (keeping all assignment at 'level' but not beyond).
