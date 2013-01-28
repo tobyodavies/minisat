@@ -274,6 +274,19 @@ protected:
     bool     locked           (const Clause& c) const; // Returns TRUE if a clause is a reason for some implication in the current state.
     bool     satisfied        (const Clause& c) const; // Returns TRUE if a clause is satisfied in the current state.
 
+    template <class container>
+    unsigned lbd(const container& c){
+      lbdlevels.clear();
+      for (int i = 0 ; i < c.size() ; i++){
+        lbdlevels.insert(level(var(c[i])));
+        if (lbdlevels.size() >= MAX_LBD){
+          return MAX_LBD - 1;
+        }
+      }
+      return lbdlevels.size() - 1;
+    }
+
+
     unsigned lbd(const vec<Lit>& c) const;             // Calculates Literals Block Distance for a clause based on current search state
     unsigned lbd(const Clause& c) const;             // Calculates Literals Block Distance for a clause based on current search state
 
